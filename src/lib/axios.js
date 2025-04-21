@@ -1,7 +1,7 @@
 import axios from "axios";
 
 export const axiosInstance = axios.create({
-    baseURL: "https://dummyjson.com",
+    baseURL: "https://dummyjson.com/",
 });
 
 axiosInstance.interceptors.request.use(
