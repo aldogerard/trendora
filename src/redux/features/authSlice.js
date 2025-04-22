@@ -4,11 +4,23 @@ import { jwtDecode } from "jwt-decode";
 
 const loadFromLocalStorage = () => {
     try {
-        const token = localStorage.getItem("token");
-        return { token };
+        return localStorage.getItem("token");
     } catch (error) {
-        return { token: null };
+        return null;
     }
+};
+
+export const isTokenValid = (token) => {
+    if (!token) return false;
+
+    try {
+        const { exp } = jwtDecode(token);
+        const currentTime = Math.floor(Date.now() / 1000);
+        if (exp <= currentTime) return false;
+    } catch (error) {
+        return false;
+    }
+    return !!token;
 };
 
 export const login = createAsyncThunk(
@@ -18,7 +30,7 @@ export const login = createAsyncThunk(
             const { data } = await axiosInstance.post("auth/login", {
                 username,
                 password,
-                expiresInMins: 30,
+                expiresInMins: 15,
             });
             return data;
         } catch (error) {
@@ -29,13 +41,17 @@ export const login = createAsyncThunk(
 
 export const getMe = createAsyncThunk(
     "auth/getMe",
-    async (_, { rejectWithValue }) => {
+    async ({ token }, { rejectWithValue }) => {
         try {
-            const { token } = loadFromLocalStorage();
+            const accessToken = token || loadFromLocalStorage();
+
+            if (!isTokenValid(accessToken))
+                return rejectWithValue("Invalid Token");
+
             const { data } = await axiosInstance.get("auth/me", {
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${accessToken}`,
             });
-            console.log(data);
+            return { accessToken, data };
         } catch (error) {
             return rejectWithValue("Invalid Token");
         }
@@ -46,7 +62,7 @@ const authSlice = createSlice({
     name: "auth",
     initialState: {
         user: null,
-        token: loadFromLocalStorage().token || null,
+        token: loadFromLocalStorage() || null,
     },
     reducers: {
         setUser(state, action) {
@@ -64,29 +80,34 @@ const authSlice = createSlice({
         },
     },
     extraReducers: (builder) => {
-        builder.addCase(login.fulfilled, (state, action) => {
-            const { accessToken, email, id } = action.payload;
-            state.user = { email, id };
-            state.token = accessToken;
+        builder
+            .addCase(login.fulfilled, (state, action) => {
+                const { accessToken } = action.payload;
+                state.token = accessToken;
 
-            localStorage.setItem("token", accessToken);
-        });
+                localStorage.setItem("token", accessToken);
+            })
+            .addCase(login.rejected, (state, action) => {
+                state.user = null;
+                state.token = null;
+
+                localStorage.removeItem("token");
+            })
+            .addCase(getMe.fulfilled, (state, action) => {
+                const { accessToken, data } = action.payload;
+                state.user = data;
+                state.token = accessToken;
+
+                localStorage.setItem("token", accessToken);
+            })
+            .addCase(getMe.rejected, (state, action) => {
+                state.user = null;
+                state.token = null;
+
+                localStorage.removeItem("token");
+            });
     },
 });
-
-export const selectIsLogin = () => {
-    const { token } = loadFromLocalStorage();
-    if (!token) return false;
-
-    try {
-        const { exp } = jwtDecode(token);
-        const currentTime = Math.floor(Date.now() / 1000);
-        if (exp <= currentTime) return false;
-    } catch (error) {
-        return false;
-    }
-    return !!token;
-};
 
 export const { setUser, clearUser } = authSlice.actions;
 export default authSlice.reducer;
